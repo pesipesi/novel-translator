@@ -1,0 +1,206 @@
+/* 対訳表示用レイアウト */
+.paragraph {
+  margin-bottom: 1.5em;
+}
+.paragraph-number {
+  font-weight: bold;
+  margin-right: 0.5em;
+}
+.paragraph > div {
+  margin-top: 0.5em;
+}
+.paragraph div[style*="display: flex"] {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fafcff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+  padding: 0.5em 0.5em;
+}
+.paragraph div[style*="display: flex"] > div {
+  min-width: 0;
+}
+.paragraph div[style*="display: flex"] > div:first-child {
+  background: #f7f7fa;
+}
+.paragraph div[style*="display: flex"] > div:last-child {
+  background: #f9f9f6;
+}
+.retranslate-btn {
+  margin-top: 0.5em;
+  padding: 0.3em 1em;
+  border-radius: 4px;
+  border: 1px solid #bbb;
+  background: #f5f5f5;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.retranslate-btn:hover {
+  background: #e0e0e0;
+}
+@media (max-width: 700px) {
+  .paragraph div[style*="display: flex"] {
+    flex-direction: column;
+    gap: 0.5em;
+    padding: 0.5em 0.2em;
+  }
+}
+
+body {
+  font-family: 'Segoe UI', 'Hiragino Sans', 'Meiryo', Arial, sans-serif;
+  background: #f6f8fa;
+  margin: 0;
+  padding: 0;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 40px auto 40px auto;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  padding: 32px 40px 32px 40px;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+header h1 {
+  font-size: 2.2em;
+  margin-bottom: 0.2em;
+  color: #2a3a4d;
+}
+.subtitle {
+  color: #6a7a8c;
+  font-size: 1.1em;
+  margin-bottom: 0;
+}
+
+.modern-form {
+  background: #f7fafd;
+  border-radius: 8px;
+  padding: 24px 18px 12px 18px;
+  margin-bottom: 32px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+}
+.form-row {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 18px;
+}
+.form-row label {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #2a3a4d;
+}
+.form-row input[type="text"],
+.form-row input[type="password"],
+.form-row input[type="file"] {
+  padding: 8px 10px;
+  border: 1px solid #cfd8dc;
+  border-radius: 5px;
+  font-size: 1em;
+  background: #fff;
+  transition: border 0.2s;
+}
+.form-row input[type="text"]:focus,
+.form-row input[type="password"]:focus {
+  border: 1.5px solid #4f8cff;
+  outline: none;
+}
+.main-btn {
+  background: linear-gradient(90deg, #4f8cff 0%, #6ad7ff 100%);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 10px 28px;
+  font-size: 1.1em;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(79,140,255,0.08);
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.main-btn:hover {
+  background: linear-gradient(90deg, #357ae8 0%, #4fc3f7 100%);
+  box-shadow: 0 4px 16px rgba(79,140,255,0.13);
+}
+.main-btn.sub {
+  background: #e3f2fd;
+  color: #357ae8;
+  border: 1px solid #b3d7ff;
+  font-size: 1em;
+  margin-bottom: 1em;
+}
+.main-btn.sub:hover {
+  background: #bbdefb;
+  color: #1565c0;
+}
+
+.results-section {
+  margin-top: 32px;
+}
+.result-block {
+  background: #f7fafd;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  padding: 18px 16px 12px 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+}
+.result-block h3 {
+  margin-top: 0;
+  color: #357ae8;
+}
+.result-content {
+  font-size: 1.08em;
+  color: #2a3a4d;
+  margin-bottom: 0.5em;
+}
+
+progress#progressBar {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 20px;
+  border-radius: 10px;
+  background: #e3f2fd;
+  box-shadow: 0 1px 4px rgba(79,140,255,0.08);
+}
+progress#progressBar::-webkit-progress-bar {
+  background: #e3f2fd;
+  border-radius: 10px;
+}
+progress#progressBar::-webkit-progress-value {
+background: linear-gradient(90deg, #43e97b 0%, #38f9d7 100%);
+  border-radius: 10px;
+}
+progress#progressBar::-moz-progress-bar {
+background: linear-gradient(90deg, #43e97b 0%, #38f9d7 100%);
+  border-radius: 10px;
+}
+
+@media (max-width: 700px) {
+  .container {
+    padding: 10px 2vw 10px 2vw;
+  }
+  .modern-form {
+    padding: 12px 4vw 8px 4vw;
+  }
+  .result-block {
+    padding: 10px 2vw 8px 2vw;
+  }
+}
+
+#translation .line {
+  padding: 5px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.line-number {
+  width: 30px;
+  display: inline-block;
+  font-weight: bold;
+}
+
+.retranslate-btn {
+  margin-left: 10px;
+  font-size: 0.9em;
+}

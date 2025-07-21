@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>小説翻訳アプリ</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>小説翻訳アプリ</h1>
+      <p class="subtitle">Amazon Bedrock 対応・小説要約＆翻訳ツール</p>
+    </header>
+    <form id="translateForm" class="modern-form">
+      <div class="form-row">
+        <label>使用モデルID(推論プロファイルID)</label>
+        <input type="text" name="modelId" required placeholder="例: apac.anthropic.claude-sonnet-4-20250514-v1:0" />
+      </div>
+      <div class="form-row">
+        <label>リージョン名</label>
+        <input type="text" name="region" required placeholder="例: us-east-1" />
+      </div>
+      <div class="form-row">
+        <label>AWSアクセスキーID</label>
+        <input type="text" name="accessKeyId" required />
+      </div>
+      <div class="form-row">
+        <label>AWSシークレットアクセスキー</label>
+        <input type="password" name="secretAccessKey" required />
+      </div>
+      <div class="form-row">
+        <label>翻訳元言語</label>
+        <input type="text" name="sourceLang" required placeholder="例: 日本語" />
+      </div>
+      <div class="form-row">
+        <label>翻訳先言語</label>
+        <input type="text" name="targetLang" required placeholder="例: 英語" />
+      </div>
+      <div class="form-row">
+        <label>作者名</label>
+        <input type="text" name="authorName" placeholder="任意" />
+      </div>
+      <div class="form-row">
+        <label>タイトル</label>
+        <input type="text" name="bookTitle" placeholder="任意" />
+      </div>
+      <div class="form-row">
+        <label>本文ファイル(txt)</label>
+        <input type="file" name="novelFile" accept=".txt" required />
+      </div>
+      <div class="form-row">
+        <label style="display:flex;align-items:center;gap:1em;">
+          <span>
+            <input type="checkbox" id="highPrecision" name="highPrecision" value="true">
+            高精度翻訳（入力トークン数が増加します）
+          </span>
+          <span style="display:flex;align-items:center;gap:0.5em;">
+            <input type="range" id="temperature" name="temperature" min="0" max="1" step="0.1" value="0.4" style="width:100px;">
+            <span id="temperatureValue">0.4</span>
+            <label for="temperature" style="margin:0;">(温度 0: 堅実で保守的, 1: ランダムで創造的)</label>
+          </span>
+        </label>
+      </div>
+      <div class="form-row">
+        <button type="submit" class="main-btn">翻訳開始</button>
+      </div>
+    </form>
+
+    <section id="results" style="display:none;" class="results-section">
+      <h2>結果</h2>
+      <div style="margin-bottom:1em;">
+        <progress id="progressBar" value="0" max="100" style="width: 100%; height: 20px;"></progress>
+      </div>
+      <div id="status"></div>
+
+      <div class="result-block">
+        <h3>要約 <button id="copySummaryBtn" class="copy-btn" title="要約をコピー">📋</button></h3>
+        <div id="summary" class="result-content"></div>
+      </div>
+
+      <div class="result-block">
+        <h3>登場人物 <button id="copyCharactersBtn" class="copy-btn" title="登場人物紹介をコピー">📋</button></h3>
+        <div id="characters" class="result-content"></div>
+      </div>
+
+      <div class="result-block">
+        <h3>本文翻訳</h3>
+        <div id="novelMeta" style="margin-bottom:8px;"></div>
+        <div class="copy-group">
+          <button id="copyTranslationAllBtn" class="copy-btn" title="翻訳後全文コピー">全文copy❒</button>
+          <button id="copyTranslationParaBtn" class="copy-btn" title="翻訳後段落コピー">段落copy❒</button>
+          <button id="copyOriginalAllBtn" class="copy-btn" title="原文全文コピー">原文全文❒</button>
+          <button id="copyOriginalParaBtn" class="copy-btn" title="原文段落コピー">原文段落❒</button>
+        </div>
+        <button id="toggleParallel" class="main-btn sub">対訳表示</button>
+        <div id="translation"></div>
+      </div>
+    </section>
+  <script src="novelmeta.js"></script>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>
