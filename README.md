@@ -15,7 +15,7 @@ https://zenn.dev/pesi/articles/7bb34b30673b8d
 ## セットアップ・利用方法
 1. Node.js（v18以上推奨）をインストール
 2. `npm install`
-3. `node server.js` で起動
+3. `npm start` で起動
 4. ブラウザで `http://localhost:3000` にアクセス
 
 ## ライセンス
