@@ -36,7 +36,7 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
     // 段落分割プロンプト
     const paragraphPrompt = `翻訳前の小説の文章を内容に従って自然な段落ごとに分割してください。各段落は原文の意味やストーリーのまとまりを考慮して分けてください。出力はJSON配列で、各要素が1つの段落テキストとなるようにしてください。説明や余計な文章、バッククォートやコードブロック、"json"などは一切付けず、純粋なJSON配列のみを出力してください。`;
     // 翻訳プロンプト（各段落ごとに使う）
-    const translationPromptSingle = (paragraph) => `<paragraph>タグで段落を渡します。翻訳前の全文章のニュアンスを考慮したうえで、段落を${sourceLang}から${targetLang}へ翻訳してください。自然な言葉づかいで表現は文学的にしてください。ただし、原文から飛躍のある意味にしてはいけません。<paragraph>${paragraph}</paragraph>`;
+    const translationPromptSingle = (paragraph) => `<paragraph>タグで段落を渡します。翻訳前の小説の文章を参考に前後のニュアンスを考慮したうえで、段落を${sourceLang}から${targetLang}へ翻訳してください。自然な言葉づかいで表現は文学的にしてください。ただし、原文から飛躍のある意味にしてはいけません。<paragraph>${paragraph}</paragraph>`;
 
     // Bedrock Converse API 呼び出し関数（cachePoint, cacheRead, cacheWrite対応）
     const converseBedrock = async ({prompt, messages}) => {
@@ -109,25 +109,23 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
           if (anyTextObj) content = anyTextObj.text;
         }
       }
-      // トークン数はoutput.usage.inputTokens/outputTokens または usage.inputTokens/outputTokens
+      // トークン数はoutput.usage.inputTokens/outputTokens/cacheRead/cacheWrite または usage.*
       let inputTokens = 0;
       let outputTokens = 0;
-      if (response.output && response.output.usage) {
-        inputTokens = response.output.usage.inputTokens ?? 0;
-        outputTokens = response.output.usage.outputTokens ?? 0;
-      }
-      // usageがoutputの外側にある場合も考慮
-      if (response.usage) {
-        if (typeof response.usage.inputTokens === 'number') inputTokens = response.usage.inputTokens;
-        if (typeof response.usage.outputTokens === 'number') outputTokens = response.usage.outputTokens;
-      }
+      let cacheReadTokens = 0;
+      let cacheWriteTokens = 0;
+      const usage = (response.output && response.output.usage) ? response.output.usage : response.usage || {};
+      if (typeof usage.inputTokens === 'number') inputTokens = usage.inputTokens;
+      if (typeof usage.outputTokens === 'number') outputTokens = usage.outputTokens;
+      if (typeof usage.cacheReadInputTokens === 'number') cacheReadTokens = usage.cacheReadInputTokens;
+      if (typeof usage.cacheWriteInputTokens === 'number') cacheWriteTokens = usage.cacheWriteInputTokens;
 
       // stopReason判定
       let stopReason_check = false;
       if (response.stopReason) {
         if (response.stopReason === 'max_tokens') stopReason_check = true;
       }
-      return { content, inputTokens, outputTokens, output: response.output, stopReason_check };
+      return { content, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, output: response.output, stopReason_check };
     };
 
     // 1. summary: cacheWriteで小説本文をキャッシュ
@@ -177,13 +175,15 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
 
     // 4. 各段落ごとに翻訳
     let translatedLines = [];
-    let translationTokens = {input:0,output:0};
+    let translationTokens = {input:0,output:0,cacheRead:0,cacheWrite:0};
     let translationDebugs = [];
     for (let i = 0; i < originalParagraphs.length; i++) {
       const para = originalParagraphs[i];
       let paraTranslation = '';
       let paraInputTokens = 0;
       let paraOutputTokens = 0;
+      let paraCacheReadTokens = 0;
+      let paraCacheWriteTokens = 0;
       // 文脈用: これまでの原文・翻訳済み段落をmessages履歴に含める（高精度モードのみ）
       let translationMessages = [];
       if (highPrecision === 'true' || highPrecision === true) {
@@ -251,6 +251,9 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
         paraTranslation += translationResp.content || '';
         paraInputTokens += translationResp.inputTokens || 0;
         paraOutputTokens += translationResp.outputTokens || 0;
+        // cacheRead/cacheWriteも集計（converseBedrock返却値から直接取得）
+        paraCacheReadTokens += translationResp.cacheReadTokens || 0;
+        paraCacheWriteTokens += translationResp.cacheWriteTokens || 0;
         const { stopReason_check } = translationResp;
         if (stopReason_check === true) {
           translationMessages.push({
@@ -268,6 +271,8 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
       translatedLines.push(paraTranslation);
       translationTokens.input += paraInputTokens;
       translationTokens.output += paraOutputTokens;
+      translationTokens.cacheRead += paraCacheReadTokens;
+      translationTokens.cacheWrite += paraCacheWriteTokens;
     }
 
     // Bedrockレスポンスのusage, content抽出（必ずtextを抽出）
@@ -284,30 +289,35 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
       return '';
     }
 
-    // input/output tokens合計
+
+    // input/output/cacheRead/cacheWrite tokens合計
     function getTokens(resp) {
-      // converseBedrock返却値にinputTokens/outputTokensが含まれる場合はそれを使う
-      if (typeof resp.inputTokens === 'number' && typeof resp.outputTokens === 'number') {
-        return {
-          input: resp.inputTokens,
-          output: resp.outputTokens
-        };
-      }
-      // それ以外はBedrockレスポンスから抽出
-      if (resp.output && resp.output.usage) {
-        return {
-          input: resp.output.usage.inputTokens || 0,
-          output: resp.output.usage.outputTokens || 0
-        };
-      }
-      return { input: 0, output: 0 };
+      let input = 0, output = 0, cacheRead = 0, cacheWrite = 0;
+      // output.usage優先
+      const usage = (resp.output && resp.output.usage) ? resp.output.usage : resp.usage || {};
+      if (typeof usage.inputTokens === 'number') input = usage.inputTokens;
+      if (typeof usage.outputTokens === 'number') output = usage.outputTokens;
+      // cacheRead/cacheWrite: 両方のプロパティに対応
+      if (typeof usage.cacheReadInputTokens === 'number') cacheRead = usage.cacheReadInputTokens;
+      if (typeof usage.cacheWriteInputTokens === 'number') cacheWrite = usage.cacheWriteInputTokens;
+      return { input, output, cacheRead, cacheWrite };
     }
     const summaryTokens    = getTokens(summaryResp);
     const charactersTokens = getTokens(charactersResp);
     const paragraphTokens  = getTokens(paragraphResp);
+    // translationTokensにもcacheRead/cacheWriteを含める
     const totalInputTokens  = summaryTokens.input + charactersTokens.input + paragraphTokens.input + translationTokens.input;
     const totalOutputTokens = summaryTokens.output + charactersTokens.output + paragraphTokens.output + translationTokens.output;
-    const cost = (totalInputTokens * COST_PER_INPUT_TOKEN) + (totalOutputTokens * COST_PER_OUTPUT_TOKEN);
+    const totalCacheReadTokens  = summaryTokens.cacheRead + charactersTokens.cacheRead + paragraphTokens.cacheRead + translationTokens.cacheRead;
+    const totalCacheWriteTokens = summaryTokens.cacheWrite + charactersTokens.cacheWrite + paragraphTokens.cacheWrite + translationTokens.cacheWrite;
+
+    // コスト計算
+    const COST_PER_CACHE_READ  = 0.0003 / 1000;
+    const COST_PER_CACHE_WRITE = 0.00375 / 1000;
+    const cost = (totalInputTokens * COST_PER_INPUT_TOKEN)
+              + (totalOutputTokens * COST_PER_OUTPUT_TOKEN)
+              + (totalCacheReadTokens * COST_PER_CACHE_READ)
+              + (totalCacheWriteTokens * COST_PER_CACHE_WRITE);
 
     // summary, charactersも同様に抽出
     let summaryText    = extractText(summaryResp);
@@ -326,15 +336,17 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
       usage: {
         inputTokens: totalInputTokens,
         outputTokens: totalOutputTokens,
+        cacheReadInputTokens: totalCacheReadTokens,
+        cacheWriteInputTokens: totalCacheWriteTokens,
         cost: cost.toFixed(6)
       },
       summary:    summaryText,
       characters: charactersText,
       originalParagraphs,
       translatedLines,
-      authorName, // 追加
-      bookTitle,  // 追加
-      debugInfo // フロントで一時表示可能
+      authorName,
+      bookTitle,
+      debugInfo
     });
   } catch (error) {
     console.error(error.response?.data || error.message);

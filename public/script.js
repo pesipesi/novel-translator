@@ -163,9 +163,17 @@ document.addEventListener('DOMContentLoaded', () => {
       // usageがundefinedの場合でも0で初期化
       const inputTokens = (data.usage && typeof data.usage.inputTokens === 'number') ? data.usage.inputTokens : 0;
       const outputTokens = (data.usage && typeof data.usage.outputTokens === 'number') ? data.usage.outputTokens : 0;
+      const cacheReadTokens = (data.usage && typeof data.usage.cacheReadInputTokens === 'number') ? data.usage.cacheReadInputTokens : 0;
+      const cacheWriteTokens = (data.usage && typeof data.usage.cacheWriteInputTokens === 'number') ? data.usage.cacheWriteInputTokens : 0;
       const cost = (data.usage && typeof data.usage.cost === 'string') ? data.usage.cost : '0.000000';
       if (progressBar) progressBar.value = 100;
-      statusDiv.textContent = `成功 入力トークン: ${inputTokens} 出力トークン: ${outputTokens} コスト目安: $${cost} (入力:$0.000003 出力:$0.000015 換算)`;
+      statusDiv.innerHTML = `成功<br>
+        入力トークン: ${inputTokens}<br>
+        出力トークン: ${outputTokens}<br>
+        cacheReadトークン: ${cacheReadTokens}<br>
+        cacheWriteトークン: ${cacheWriteTokens}<br>
+        コスト目安: $${cost} <br>
+        (入力:$0.000003 出力:$0.000015 cacheRead:$0.0003 cacheWrite:$0.00375 換算)`;
       if (paragraphWarning) {
         statusDiv.innerHTML += `<br><span style='color:#c00;font-weight:bold;'>${paragraphWarning}</span>`;
       }
