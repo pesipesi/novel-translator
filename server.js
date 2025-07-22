@@ -36,7 +36,7 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
     // 段落分割プロンプト
     const paragraphPrompt = `翻訳前の小説の文章を内容に従って自然な段落ごとに分割してください。各段落は原文の意味やストーリーのまとまりを考慮して分けてください。出力はJSON配列で、各要素が1つの段落テキストとなるようにしてください。説明や余計な文章、バッククォートやコードブロック、"json"などは一切付けず、純粋なJSON配列のみを出力してください。`;
     // 翻訳プロンプト（各段落ごとに使う）
-    const translationPromptSingle = (paragraph) => `<paragraph>タグで段落を渡します。翻訳前の小説の文章を参考にしながら、段落を${sourceLang}から${targetLang}へ翻訳してください。自然な言葉づかいで表現は文学的にしてください。ただし、原文から飛躍のある意味にしてはいけません。<paragraph>${paragraph}</paragraph>`;
+    const translationPromptSingle = (paragraph) => `<paragraph>タグで段落を渡します。翻訳前の全文章のニュアンスを考慮したうえで、段落を${sourceLang}から${targetLang}へ翻訳してください。自然な言葉づかいで表現は文学的にしてください。ただし、原文から飛躍のある意味にしてはいけません。<paragraph>${paragraph}</paragraph>`;
 
     // Bedrock Converse API 呼び出し関数（cachePoint, cacheRead, cacheWrite対応）
     const converseBedrock = async ({prompt, messages}) => {
@@ -53,6 +53,8 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
         system: [
           {
             text: system_prompt,
+          },
+          {
             cachePoint: {type: 'default'}
           }
         ],
@@ -203,9 +205,8 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
               content: [
                 {
                   text: `原文: ${originalParagraphs[j]}`
-                },
+                }
               ],
-              cachePoint: {type: 'default'}
             });
             translationMessages.push({
               role: 'assistant',
