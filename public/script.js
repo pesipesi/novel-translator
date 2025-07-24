@@ -173,7 +173,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cacheReadトークン: ${cacheReadTokens}<br>
         cacheWriteトークン: ${cacheWriteTokens}<br>
         コスト目安: $${cost} <br>
-        (入力:$0.000003 出力:$0.000015 cacheRead:$0.0003 cacheWrite:$0.00375 換算)`;
+        (入力:$0.000003 出力:$0.000015 cacheRead:$0.0000003 cacheWrite:$0.0000375 換算)`;
       if (paragraphWarning) {
         statusDiv.innerHTML += `<br><span style='color:#c00;font-weight:bold;'>${paragraphWarning}</span>`;
       }

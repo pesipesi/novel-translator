@@ -3,6 +3,7 @@ const multer = require('multer');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const { BedrockRuntimeClient, ConverseCommand } = require('@aws-sdk/client-bedrock-runtime');
+const { BedrockRuntimeClient, ConverseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
 const fs = require('fs-extra');
 
 // Bedrock Claude 3 Sonnet: $0.003 per 1K input tokens, $0.015 per 1K output tokens
@@ -30,16 +31,17 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
     const text = req.file.buffer.toString('utf-8');
 
     // 各タスク用プロンプトを組み立て
-    const system_prompt = `<novel>タグで翻訳前の小説の文章を渡します。AIは小説の文章に関するタスクを行います。<novel>${text}</novel>`;
-    const summaryPrompt = `小説の文章を${sourceLang}から${targetLang}で140字から500字程度に要約してください。必要があれば小説のタイトルである${bookTitle}も要約の参考にしてください。小説の文章とタイトルの情報だけを要約の参考にしてください。改行は<br>タグで記載してください。`;
-    const charactersPrompt = `主要なキャラクターを抽出し、${targetLang}で2-3行程度で紹介してください。フォーマットは"人物:説明"という形にして、それ以外の文章を出力してはいけません。人物ごとに<br><br>で改行してください。`;
+    const system_prompt = `<novel>タグで小説の原文を渡します。AIは翻訳家として小説の翻訳に関するタスクを行います。<novel>${text}</novel>`;
+    const summaryPrompt = `小説の原文を${sourceLang}から${targetLang}で140字から500字程度に要約してください。必要があれば小説のタイトルである${bookTitle}も要約の参考にしてください。小説の原文とタイトルの情報だけを要約の参考にしてください。改行は<br>タグで記載してください。`;
+    const charactersPrompt = `小説の原文から主要なキャラクターを抽出し、${targetLang}で2-3行程度で紹介してください。フォーマットは"人物:説明"という形にして、それ以外の文章を出力してはいけません。人物ごとに<br><br>で改行してください。`;
     // 段落分割プロンプト
-    const paragraphPrompt = `翻訳前の小説の文章を内容に従って自然な段落ごとに分割してください。各段落は原文の意味やストーリーのまとまりを考慮して分けてください。出力はJSON配列で、各要素が1つの段落テキストとなるようにしてください。説明や余計な文章、バッククォートやコードブロック、"json"などは一切付けず、純粋なJSON配列のみを出力してください。`;
+    const paragraphPrompt = `小説の原文を内容にしたがって${sourceLang}で自然な段落ごとに分割してください。各段落は小説の原文の意味やストーリーのまとまりを考慮して分けてください。出力はJSON配列で、各要素が1つの段落テキストとなるようにしてください。小説の原文に説明や余計な文章の追加は行わず、純粋なJSON配列のみを出力してください。`;
     // 翻訳プロンプト（各段落ごとに使う）
-    const translationPromptSingle = (paragraph) => `<paragraph>タグで段落を渡します。翻訳前の小説の文章を参考に前後のニュアンスを考慮したうえで、段落を${sourceLang}から${targetLang}へ翻訳してください。自然な言葉づかいで表現は文学的にしてください。ただし、原文から飛躍のある意味にしてはいけません。<paragraph>${paragraph}</paragraph>`;
+    const translationPromptSingle = (paragraph) => `<paragraph>タグで段落を渡します。段落を${sourceLang}から${targetLang}へ翻訳してください。小説の原文を参考にして前後の文脈を理解したうえで、自然な言葉づかいで表現は文学的にしてください。ただし、原文に忠実に沿った意味で翻訳してください。<paragraph>${paragraph}</paragraph>`;
 
     // Bedrock Converse API 呼び出し関数（cachePoint, cacheRead, cacheWrite対応）
     const converseBedrock = async ({prompt, messages}) => {
+      console.log("converseBedrock start")
       const client = new BedrockRuntimeClient({
         region,
         credentials: {
@@ -73,15 +75,18 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
             temperature: (typeof temperature !== 'undefined' && temperature !== null) ? Number(temperature) : 0.4
         }
       };
-
+      console.log("command exec")
       const command = new ConverseCommand(input);
+      console.log("get response")
       const response = await client.send(command);
       // content配列の中身も明示的にログ出力
+      console.log("output log")
       if (response.output && response.output.message && Array.isArray(response.output.message.content)) {
         console.log('Bedrock Converse response content array:', response.output.message.content);
       }
       console.log('Bedrock Converse response:', response);
       // bedrock.logに追記
+      console.log("add bedrock log")
       try {
         await fs.appendFile('bedrock.log', JSON.stringify(response, null, 2) + '\n');
       } catch (e) {
@@ -129,12 +134,15 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
     };
 
     // 1. summary: cacheWriteで小説本文をキャッシュ
+    console.log('start summary...');
     const summaryResp = await converseBedrock({
       prompt: summaryPrompt,
     });
     if (summaryResp.error) return res.status(500).json({ success: false, error: summaryResp.error, raw: summaryResp.raw });
+    console.log('end summary...');
 
     // 2. characters: cacheReadでキャッシュ利用、messages履歴はcharactersPromptのみ
+    console.log('start characters...');
     const charactersMessages = [
       {
         role: 'user',
@@ -150,17 +158,21 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
       messages: charactersMessages
     });
     if (charactersResp.error) return res.status(500).json({ success: false, error: charactersResp.error, raw: charactersResp.raw });
+    console.log('end characters...');
 
     // 3. 段落分割: Bedrockで段落配列を取得
+    console.log('start paragraph...');
     const paragraphResp = await converseBedrock({
       prompt: paragraphPrompt
     });
+    console.log(paragraphResp.content)
     if (paragraphResp.error) return res.status(500).json({ success: false, error: paragraphResp.error, raw: paragraphResp.raw });
     // 段落配列を抽出
     let originalParagraphs = [];
-    let paraContent = paragraphResp.content || '';
+        let paraContent = paragraphResp.content || '';
     // コードブロックやバッククォート、"json"などを除去
     paraContent = paraContent.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    console.log('start json parse...');
     try {
       // JSON配列としてパース
       originalParagraphs = JSON.parse(paraContent);
@@ -170,10 +182,13 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
       originalParagraphs = [paragraphResp.content];
     }
     // 空要素除去
+    console.log('start trim null...');
     originalParagraphs = originalParagraphs.map(s => (typeof s === 'string' ? s.trim() : '')).filter(s => s);
     if (originalParagraphs.length === 0) originalParagraphs = [text];
+    console.log('end paragraph...');
 
     // 4. 各段落ごとに翻訳
+    console.log('start translate...');
     let translatedLines = [];
     let translationTokens = {input:0,output:0,cacheRead:0,cacheWrite:0};
     let translationDebugs = [];
