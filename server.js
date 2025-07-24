@@ -2,7 +2,6 @@ const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const { BedrockRuntimeClient, ConverseCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { BedrockRuntimeClient, ConverseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
 const fs = require('fs-extra');
 
@@ -76,7 +75,7 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
         }
       };
       console.log("command exec")
-      const command = new ConverseCommand(input);
+/*       const command = new ConverseCommand(input);
       console.log("get response")
       const response = await client.send(command);
       // content配列の中身も明示的にログ出力
@@ -130,7 +129,51 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
       if (response.stopReason) {
         if (response.stopReason === 'max_tokens') stopReason_check = true;
       }
-      return { content, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, output: response.output, stopReason_check };
+      return { content, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, output: response.output, stopReason_check }; */
+      //##############################################33
+      const command = new ConverseStreamCommand(input);
+      console.log("get response")
+      const response = await client.send(command);
+
+      let content = '';
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let cacheReadTokens = 0;
+      let cacheWriteTokens = 0;
+      let stopReason_check = false;
+
+      // ストリームを処理
+      for await (const chunk of response.stream) {
+        if (chunk.contentBlockDelta?.delta?.text) {
+          content += chunk.contentBlockDelta.delta.text;
+        }
+        
+        if (chunk.metadata?.usage) {
+          const usage = chunk.metadata.usage;
+          if (typeof usage.inputTokens === 'number') inputTokens = usage.inputTokens;
+          if (typeof usage.outputTokens === 'number') outputTokens = usage.outputTokens;
+          if (typeof usage.cacheReadInputTokens === 'number') cacheReadTokens = usage.cacheReadInputTokens;
+          if (typeof usage.cacheWriteInputTokens === 'number') cacheWriteTokens = usage.cacheWriteInputTokens;
+        }
+
+        if (chunk.messageStop?.stopReason === 'max_tokens') {
+          stopReason_check = true;
+        }
+      }
+
+      console.log('Bedrock Stream response content:', content);
+      
+      // bedrock.logに追記
+      console.log("add bedrock log")
+      try {
+        const logData = { content, usage: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }, stopReason_check };
+        await fs.appendFile('bedrock.log', JSON.stringify(logData, null, 2) + '\n');
+      } catch (e) {
+        console.error('bedrock.logへの書き込み失敗:', e);
+      }
+
+      return { content, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, stopReason_check };
+      //##############################################33
     };
 
     // 1. summary: cacheWriteで小説本文をキャッシュ
