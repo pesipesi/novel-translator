@@ -8,6 +8,8 @@ const fs = require('fs-extra');
 // Bedrock Claude 3 Sonnet: $0.003 per 1K input tokens, $0.015 per 1K output tokens
 const COST_PER_INPUT_TOKEN = 0.003 / 1000;   // $0.000003
 const COST_PER_OUTPUT_TOKEN = 0.015 / 1000;  // $0.000015
+const COST_PER_CACHE_READ  = 0.0003 / 1000;
+const COST_PER_CACHE_WRITE = 0.00375 / 1000;
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -347,31 +349,13 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
       return '';
     }
 
-
-    // input/output/cacheRead/cacheWrite tokens合計
-    function getTokens(resp) {
-      let input = 0, output = 0, cacheRead = 0, cacheWrite = 0;
-      // output.usage優先
-      const usage = (resp.output && resp.output.usage) ? resp.output.usage : resp.usage || {};
-      if (typeof usage.inputTokens === 'number') input = usage.inputTokens;
-      if (typeof usage.outputTokens === 'number') output = usage.outputTokens;
-      // cacheRead/cacheWrite: 両方のプロパティに対応
-      if (typeof usage.cacheReadInputTokens === 'number') cacheRead = usage.cacheReadInputTokens;
-      if (typeof usage.cacheWriteInputTokens === 'number') cacheWrite = usage.cacheWriteInputTokens;
-      return { input, output, cacheRead, cacheWrite };
-    }
-    const summaryTokens    = getTokens(summaryResp);
-    const charactersTokens = getTokens(charactersResp);
-    const paragraphTokens  = getTokens(paragraphResp);
-    // translationTokensにもcacheRead/cacheWriteを含める
-    const totalInputTokens  = summaryTokens.input + charactersTokens.input + paragraphTokens.input + translationTokens.input;
-    const totalOutputTokens = summaryTokens.output + charactersTokens.output + paragraphTokens.output + translationTokens.output;
-    const totalCacheReadTokens  = summaryTokens.cacheRead + charactersTokens.cacheRead + paragraphTokens.cacheRead + translationTokens.cacheRead;
-    const totalCacheWriteTokens = summaryTokens.cacheWrite + charactersTokens.cacheWrite + paragraphTokens.cacheWrite + translationTokens.cacheWrite;
+    // 全体のトークン使用量を計算
+    const totalInputTokens = (summaryResp.inputTokens || 0) + (charactersResp.inputTokens || 0) + (paragraphResp.inputTokens || 0) + translationTokens.input;
+    const totalOutputTokens = (summaryResp.outputTokens || 0) + (charactersResp.outputTokens || 0) + (paragraphResp.outputTokens || 0) + translationTokens.output;
+    const totalCacheReadTokens = (summaryResp.cacheReadTokens || 0) + (charactersResp.cacheReadTokens || 0) + (paragraphResp.cacheReadTokens || 0) + translationTokens.cacheRead;
+    const totalCacheWriteTokens = (summaryResp.cacheWriteTokens || 0) + (charactersResp.cacheWriteTokens || 0) + (paragraphResp.cacheWriteTokens || 0) + translationTokens.cacheWrite;
 
     // コスト計算
-    const COST_PER_CACHE_READ  = 0.0003 / 1000;
-    const COST_PER_CACHE_WRITE = 0.00375 / 1000;
     const cost = (totalInputTokens * COST_PER_INPUT_TOKEN)
               + (totalOutputTokens * COST_PER_OUTPUT_TOKEN)
               + (totalCacheReadTokens * COST_PER_CACHE_READ)
