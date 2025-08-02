@@ -36,7 +36,7 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
     const summaryPrompt = `小説の原文を${sourceLang}から${targetLang}で140字から500字程度に要約してください。必要があれば小説のタイトルである${bookTitle}も要約の参考にしてください。小説の原文とタイトルの情報だけを要約の参考にしてください。改行は<br>タグで記載してください。`;
     const charactersPrompt = `小説の原文から主要なキャラクターを抽出し、${targetLang}で2-3行程度で紹介してください。フォーマットは"人物:説明"という形にして、それ以外の文章を出力してはいけません。人物ごとに<br><br>で改行してください。`;
     // 段落分割プロンプト
-    const paragraphPrompt = `小説の原文を内容にしたがって${sourceLang}で自然な段落ごとに分割してください。各段落は小説の原文の意味やストーリーのまとまりを考慮して分けてください。出力はJSON配列で、各要素が1つの段落テキストとなるようにしてください。小説の原文に説明や余計な文章の追加は行わず、純粋なJSON配列のみを出力してください。`;
+    const paragraphPrompt = `小説の原文を内容にしたがって${sourceLang}で自然な段落ごとに分割してください。各段落は小説の原文の意味やストーリーのまとまりを考慮して分けてください。出力はJSON配列で、各要素が1つの段落テキストとなるようにしてください。小説の原文に説明や余計な文章の追加や削除は行わず、純粋なJSON配列のみを出力してください。`;
     // 翻訳プロンプト（各段落ごとに使う）
     const translationPromptSingle = (paragraph) => `<paragraph>タグで段落を渡します。段落を${sourceLang}から${targetLang}へ翻訳してください。小説の原文を参考にして前後の文脈を理解したうえで、自然な言葉づかいで表現は文学的にしてください。ただし、原文に忠実に沿った意味で翻訳してください。<paragraph>${paragraph}</paragraph>`;
 
@@ -77,62 +77,7 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
         }
       };
       console.log("command exec")
-/*       const command = new ConverseCommand(input);
-      console.log("get response")
-      const response = await client.send(command);
-      // content配列の中身も明示的にログ出力
-      console.log("output log")
-      if (response.output && response.output.message && Array.isArray(response.output.message.content)) {
-        console.log('Bedrock Converse response content array:', response.output.message.content);
-      }
-      console.log('Bedrock Converse response:', response);
-      // bedrock.logに追記
-      console.log("add bedrock log")
-      try {
-        await fs.appendFile('bedrock.log', JSON.stringify(response, null, 2) + '\n');
-      } catch (e) {
-        console.error('bedrock.logへの書き込み失敗:', e);
-      }
 
-      // レスポンス構造に合わせて処理
-      if (!response.output || !response.output.message || !response.output.message.content) {
-        return {
-          error: 'Bedrock Converse APIレスポンスにmessage.contentが含まれていません',
-          raw: response
-        };
-      }
-      // contentは配列（type: text, text: ...）
-      let content = '';
-      const arr = response.output.message.content;
-      if (Array.isArray(arr)) {
-        // type: text優先、なければtextプロパティ
-        const textObj = arr.find(c => c.type === 'text' && typeof c.text === 'string');
-        if (textObj) {
-          content = textObj.text;
-        } else {
-          // typeがない場合もtextプロパティを探す
-          const anyTextObj = arr.find(c => typeof c.text === 'string');
-          if (anyTextObj) content = anyTextObj.text;
-        }
-      }
-      // トークン数はoutput.usage.inputTokens/outputTokens/cacheRead/cacheWrite または usage.*
-      let inputTokens = 0;
-      let outputTokens = 0;
-      let cacheReadTokens = 0;
-      let cacheWriteTokens = 0;
-      const usage = (response.output && response.output.usage) ? response.output.usage : response.usage || {};
-      if (typeof usage.inputTokens === 'number') inputTokens = usage.inputTokens;
-      if (typeof usage.outputTokens === 'number') outputTokens = usage.outputTokens;
-      if (typeof usage.cacheReadInputTokens === 'number') cacheReadTokens = usage.cacheReadInputTokens;
-      if (typeof usage.cacheWriteInputTokens === 'number') cacheWriteTokens = usage.cacheWriteInputTokens;
-
-      // stopReason判定
-      let stopReason_check = false;
-      if (response.stopReason) {
-        if (response.stopReason === 'max_tokens') stopReason_check = true;
-      }
-      return { content, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, output: response.output, stopReason_check }; */
-      //##############################################33
       const command = new ConverseStreamCommand(input);
       console.log("get response")
       const response = await client.send(command);
@@ -175,7 +120,6 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
       }
 
       return { content, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, stopReason_check };
-      //##############################################33
     };
 
     // 1. summary: cacheWriteで小説本文をキャッシュ
@@ -237,6 +181,14 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
     let translatedLines = [];
     let translationTokens = {input:0,output:0,cacheRead:0,cacheWrite:0};
     let translationDebugs = [];
+
+    // 段落数を取得
+    const totalParagraphs = originalParagraphs.length;
+    // キャッシュポイントを取得
+    const splitIndex2 = Math.floor(totalParagraphs / 4) * 1;
+    const splitIndex3 = Math.floor(totalParagraphs / 4) * 2;
+    const splitIndex4 = Math.floor(totalParagraphs / 4) * 3;
+
     for (let i = 0; i < originalParagraphs.length; i++) {
       const para = originalParagraphs[i];
       let paraTranslation = '';
@@ -260,24 +212,48 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
         } else {
           // 2段落目以降は前回までの原文・翻訳済みを履歴として渡す
           for (let j = 0; j < i; j++) {
-            translationMessages.push({
-              role: 'user',
-              content: [
-                {
-                  text: `原文: ${originalParagraphs[j]}`
-                }
-              ],
-            });
-            translationMessages.push({
-              role: 'assistant',
-              content: [
-                {
-                  text: translatedLines[j] || ''
-                }
-              ]
-            });
+            if (j === splitIndex2 || j === splitIndex3 || j === splitIndex4) {
+              translationMessages.push({
+                role: 'user',
+                content: [
+                  {
+                    text: `原文: ${originalParagraphs[j]}`
+                  }
+                ],
+              });
+              translationMessages.push({
+                role: 'assistant',
+                content: [
+                  {
+                    text: translatedLines[j] || ''
+                  },
+                  {
+                    cachePoint: {type: 'default'}
+                  }
+                ]
+              });
+            }
+            else{
+              translationMessages.push({
+                role: 'user',
+                content: [
+                  {
+                    text: `原文: ${originalParagraphs[j]}`
+                  }
+                ],
+              });
+              translationMessages.push({
+                role: 'assistant',
+                content: [
+                  {
+                    text: translatedLines[j] || ''
+                  }
+                ]
+              });
+            }
           }
           // 今回の段落を翻訳指示付きで渡す
+          // 四分の一ごとにキャッシュを残す(Claudeのキャッシュポイント上限が4のため)
           translationMessages.push({
             role: 'user',
             content: [
