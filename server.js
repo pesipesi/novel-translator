@@ -1,26 +1,31 @@
-const express = require('express');
-const multer = require('multer');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const { BedrockRuntimeClient, ConverseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
-const fs = require('fs-extra');
+// 必要なモジュールをインポートします。
+const express = require('express'); // Webフレームワーク
+const multer = require('multer'); // ファイルアップロード処理
+const cors = require('cors'); // CORS（Cross-Origin Resource Sharing）設定
+const bodyParser = require('body-parser'); // リクエストボディの解析
+const { converseBedrock, calculateCost } = require('./bedrock.js'); // Bedrock API関連の関数
+const {
+  getSystemPrompt,
+  getSummaryPrompt,
+  getCharactersPrompt,
+  getParagraphPrompt,
+  getTranslationPrompt,
+} = require('./prompts.js'); // プロンプト生成関数
 
-// Bedrock Claude 3 Sonnet: $0.003 per 1K input tokens, $0.015 per 1K output tokens
-const COST_PER_INPUT_TOKEN = 0.003 / 1000;   // $0.000003
-const COST_PER_OUTPUT_TOKEN = 0.015 / 1000;  // $0.000015
-const COST_PER_CACHE_READ  = 0.0003 / 1000;
-const COST_PER_CACHE_WRITE = 0.00375 / 1000;
-
+// Expressアプリケーションを初期化します。
 const app = express();
+// ファイルアップロードをメモリ上で行うように設定します。
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors());
-app.use(bodyParser.json());
-app.use(express.static('public'));
+// ミドルウェアを設定します。
+app.use(cors()); // CORSを有効化
+app.use(bodyParser.json()); // JSON形式のリクエストボディを解析
+app.use(express.static('public')); // 'public'ディレクトリを静的ファイル配信用に設定
 
-// 小説全体の翻訳・要約・登場人物抽出
+// '/translate' エンドポイント（小説全体の翻訳・要約・登場人物抽出）
 app.post('/translate', upload.single('novelFile'), async (req, res) => {
   try {
+    // リクエストボディとファイルから必要な情報を取得します。
     const {
       modelId, region,
       accessKeyId, secretAccessKey,
@@ -29,350 +34,140 @@ app.post('/translate', upload.single('novelFile'), async (req, res) => {
       highPrecision,
       temperature
     } = req.body;
-    const text = req.file.buffer.toString('utf-8');
+    const text = req.file.buffer.toString('utf-8'); // アップロードされたファイルをUTF-8で読み込み
 
-    // 各タスク用プロンプトを組み立て
-    const system_prompt = `<novel>タグで小説の原文を渡します。AIは翻訳家として小説の翻訳に関するタスクを行います。<novel>${text}</novel>`;
-    const summaryPrompt = `小説の原文を${sourceLang}から${targetLang}で140字から500字程度に要約してください。必要があれば小説のタイトルである${bookTitle}も要約の参考にしてください。小説の原文とタイトルの情報だけを要約の参考にしてください。改行は<br>タグで記載してください。`;
-    const charactersPrompt = `小説の原文から主要なキャラクターを抽出し、${targetLang}で2-3行程度で紹介してください。フォーマットは"人物:説明"という形にして、それ以外の文章を出力してはいけません。人物ごとに<br><br>で改行してください。`;
-    // 段落分割プロンプト
-    const paragraphPrompt = `小説の原文を内容にしたがって${sourceLang}で自然な段落ごとに分割してください。各段落は小説の原文の意味やストーリーのまとまりを考慮して分けてください。出力はJSON配列で、各要素が1つの段落テキストとなるようにしてください。小説の原文に説明や余計な文章の追加や削除は行わず、純粋なJSON配列のみを出力してください。`;
-    // 翻訳プロンプト（各段落ごとに使う）
-    const translationPromptSingle = (paragraph) => `<paragraph>タグで段落を渡します。段落を${sourceLang}から${targetLang}へ翻訳してください。小説の原文を参考にして前後の文脈を理解したうえで、自然な言葉づかいで表現は文学的にしてください。ただし、原文に忠実に沿った意味で翻訳してください。<paragraph>${paragraph}</paragraph>`;
-
-    // Bedrock Converse API 呼び出し関数（cachePoint, cacheRead, cacheWrite対応）
-    const converseBedrock = async ({prompt, messages}) => {
-      console.log("converseBedrock start")
-      const client = new BedrockRuntimeClient({
-        region,
-        credentials: {
-          accessKeyId,
-          secretAccessKey
-        }
-      });
-
-      const input = {
-        modelId,
-        system: [
-          {
-            text: system_prompt,
-          },
-          {
-            cachePoint: {type: 'default'}
-          }
-        ],
-        messages: messages || [
-          {
-            role: 'user',
-            content: [
-              {
-                text: prompt
-              }
-            ]
-          }
-        ],
-        inferenceConfig: {
-            maxTokens: 40000,
-            temperature: (typeof temperature !== 'undefined' && temperature !== null) ? Number(temperature) : 0.4
-        }
-      };
-      console.log("command exec")
-
-      const command = new ConverseStreamCommand(input);
-      console.log("get response")
-      const response = await client.send(command);
-
-      let content = '';
-      let inputTokens = 0;
-      let outputTokens = 0;
-      let cacheReadTokens = 0;
-      let cacheWriteTokens = 0;
-      let stopReason_check = false;
-
-      // ストリームを処理
-      for await (const chunk of response.stream) {
-        if (chunk.contentBlockDelta?.delta?.text) {
-          content += chunk.contentBlockDelta.delta.text;
-        }
-        
-        if (chunk.metadata?.usage) {
-          const usage = chunk.metadata.usage;
-          if (typeof usage.inputTokens === 'number') inputTokens = usage.inputTokens;
-          if (typeof usage.outputTokens === 'number') outputTokens = usage.outputTokens;
-          if (typeof usage.cacheReadInputTokens === 'number') cacheReadTokens = usage.cacheReadInputTokens;
-          if (typeof usage.cacheWriteInputTokens === 'number') cacheWriteTokens = usage.cacheWriteInputTokens;
-        }
-
-        if (chunk.messageStop?.stopReason === 'max_tokens') {
-          stopReason_check = true;
-        }
-      }
-
-      console.log('Bedrock Stream response content:', content);
-      
-      // bedrock.logに追記
-      console.log("add bedrock log")
-      try {
-        const logData = { content, usage: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }, stopReason_check };
-        await fs.appendFile('bedrock.log', JSON.stringify(logData, null, 2) + '\n');
-      } catch (e) {
-        console.error('bedrock.logへの書き込み失敗:', e);
-      }
-
-      return { content, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, stopReason_check };
+    // Bedrock APIの基本設定を構築します。
+    const bedrockConfig = {
+      region,
+      accessKeyId,
+      secretAccessKey,
+      modelId,
+      temperature,
+      system_prompt: getSystemPrompt(text, bookTitle),
     };
 
-    // 1. summary: cacheWriteで小説本文をキャッシュ
-    console.log('start summary...');
-    const summaryResp = await converseBedrock({
-      prompt: summaryPrompt,
-    });
-    if (summaryResp.error) return res.status(500).json({ success: false, error: summaryResp.error, raw: summaryResp.raw });
-    console.log('end summary...');
+    // Bedrock APIを呼び出すためのヘルパー関数
+    const runBedrockTask = (prompt) => {
+      return converseBedrock({
+        ...bedrockConfig,
+        messages: [{ role: 'user', content: [{ text: prompt }] }],
+      });
+    };
 
-    // 2. characters: cacheReadでキャッシュ利用、messages履歴はcharactersPromptのみ
-    console.log('start characters...');
-    const charactersMessages = [
-      {
-        role: 'user',
-        content: [ 
-          {
-            text: charactersPrompt
-          } 
-        ]
-      }
-    ];
-    const charactersResp = await converseBedrock({
-      prompt: charactersPrompt,
-      messages: charactersMessages
-    });
-    if (charactersResp.error) return res.status(500).json({ success: false, error: charactersResp.error, raw: charactersResp.raw });
-    console.log('end characters...');
+    // 1. 要約生成、2. 登場人物抽出、3. 段落分割を並列で実行します。
+    console.log('start summary, characters, paragraph...');
+    const [summaryResp, charactersResp, paragraphResp] = await Promise.all([
+      runBedrockTask(getSummaryPrompt(sourceLang, targetLang, bookTitle)),
+      runBedrockTask(getCharactersPrompt(sourceLang, targetLang)),
+      runBedrockTask(getParagraphPrompt(sourceLang)),
+    ]);
+    console.log('end summary, characters, paragraph...');
 
-    // 3. 段落分割: Bedrockで段落配列を取得
-    console.log('start paragraph...');
-    const paragraphResp = await converseBedrock({
-      prompt: paragraphPrompt
-    });
-    console.log(paragraphResp.content)
-    if (paragraphResp.error) return res.status(500).json({ success: false, error: paragraphResp.error, raw: paragraphResp.raw });
-    // 段落配列を抽出
+    // 段落分割の結果を解析し、段落の配列を抽出します。
     let originalParagraphs = [];
-        let paraContent = paragraphResp.content || '';
-    // コードブロックやバッククォート、"json"などを除去
+    let paraContent = paragraphResp.content || '';
+    // 不要なマークダウン（```json ... ```）を削除します。
     paraContent = paraContent.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
-    console.log('start json parse...');
     try {
-      // JSON配列としてパース
       originalParagraphs = JSON.parse(paraContent);
       if (!Array.isArray(originalParagraphs)) throw new Error('not array');
     } catch (e) {
-      // パース失敗時は1段落扱い
+      // JSON解析に失敗した場合は、レスポンス全体を1つの段落として扱います。
       originalParagraphs = [paragraphResp.content];
     }
-    // 空要素除去
-    console.log('start trim null...');
+    // 各段落をトリムし、空の段落をフィルタリングします。
     originalParagraphs = originalParagraphs.map(s => (typeof s === 'string' ? s.trim() : '')).filter(s => s);
+    // 段落が取得できなかった場合は、原文全体を1つの段落とします。
     if (originalParagraphs.length === 0) originalParagraphs = [text];
-    console.log('end paragraph...');
 
-    // 4. 各段落ごとに翻訳
+    // 4. 各段落ごとに翻訳を実行します。
     console.log('start translate...');
-    let translatedLines = [];
-    let translationTokens = {input:0,output:0,cacheRead:0,cacheWrite:0};
-    let translationDebugs = [];
-
-    // 段落数を取得
+    let translatedLines = []; // 翻訳済みテキストを格納する配列
+    let translationTokens = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }; // 翻訳のトークン使用量
+    
+    // 高精度モードのために、キャッシュポイントを挿入するインデックスを計算します。
     const totalParagraphs = originalParagraphs.length;
-    // キャッシュポイントを取得
     const splitIndex2 = Math.floor(totalParagraphs / 4) * 1;
     const splitIndex3 = Math.floor(totalParagraphs / 4) * 2;
     const splitIndex4 = Math.floor(totalParagraphs / 4) * 3;
 
+    // 各段落をループして翻訳します。
     for (let i = 0; i < originalParagraphs.length; i++) {
       const para = originalParagraphs[i];
-      let paraTranslation = '';
-      let paraInputTokens = 0;
-      let paraOutputTokens = 0;
-      let paraCacheReadTokens = 0;
-      let paraCacheWriteTokens = 0;
-      // 文脈用: これまでの原文・翻訳済み段落をmessages履歴に含める（高精度モードのみ）
       let translationMessages = [];
+
+      // 高精度モードが有効な場合、過去の翻訳結果をコンテキストとして追加します。
       if (highPrecision === 'true' || highPrecision === true) {
-        // 1段落目はそのまま
-        if (i === 0) {
-          translationMessages.push({
-            role: 'user',
-            content: [
-              {
-                text: translationPromptSingle(para)
-              }
-            ]
-          });
-        } else {
-          // 2段落目以降は前回までの原文・翻訳済みを履歴として渡す
-          for (let j = 0; j < i; j++) {
-            if (j === splitIndex2 || j === splitIndex3 || j === splitIndex4) {
-              translationMessages.push({
-                role: 'user',
-                content: [
-                  {
-                    text: `原文: ${originalParagraphs[j]}`
-                  }
-                ],
-              });
-              translationMessages.push({
-                role: 'assistant',
-                content: [
-                  {
-                    text: translatedLines[j] || ''
-                  },
-                  {
-                    cachePoint: {type: 'default'}
-                  }
-                ]
-              });
-            }
-            else{
-              translationMessages.push({
-                role: 'user',
-                content: [
-                  {
-                    text: `原文: ${originalParagraphs[j]}`
-                  }
-                ],
-              });
-              translationMessages.push({
-                role: 'assistant',
-                content: [
-                  {
-                    text: translatedLines[j] || ''
-                  }
-                ]
-              });
-            }
+        for (let j = 0; j < i; j++) {
+          translationMessages.push({ role: 'user', content: [{ text: `原文: ${originalParagraphs[j]}` }] });
+          const assistantContent = [{ text: translatedLines[j] || '' }];
+          // 特定のインデックスでキャッシュポイントを挿入します。
+          if (j === splitIndex2 || j === splitIndex3 || j === splitIndex4) {
+            assistantContent.push({ cachePoint: { type: 'default' } });
           }
-          // 今回の段落を翻訳指示付きで渡す
-          // 四分の一ごとにキャッシュを残す(Claudeのキャッシュポイント上限が4のため)
-          translationMessages.push({
-            role: 'user',
-            content: [
-              {
-                text: translationPromptSingle(para)
-              }
-            ]
-          });
+          translationMessages.push({ role: 'assistant', content: assistantContent });
         }
-      } else {
-        // 高精度でなければ常にその段落のみ
-        translationMessages.push({
-          role: 'user',
-          content: [
-            {
-              text: translationPromptSingle(para)
-            }
-          ]
-        });
       }
+      
+      // 現在の段落の翻訳プロンプトを追加します。
+      translationMessages.push({ role: 'user', content: [{ text: getTranslationPrompt(para, sourceLang, targetLang) }] });
+
+      let paraTranslation = '';
       let continueFlag = true;
       let loopCount = 0;
+      // `max_tokens` で停止した場合にループで続きを取得します（最大3回）。
       while (continueFlag && loopCount < 3) {
         loopCount++;
-        const translationResp = await converseBedrock({
-          prompt: translationPromptSingle(para),
-          messages: translationMessages
-        });
-        if (translationResp.error) return res.status(500).json({ success: false, error: translationResp.error, raw: translationResp.raw });
-        translationDebugs.push(translationResp);
+        const translationResp = await converseBedrock({ ...bedrockConfig, messages: translationMessages });
+        
         paraTranslation += translationResp.content || '';
-        paraInputTokens += translationResp.inputTokens || 0;
-        paraOutputTokens += translationResp.outputTokens || 0;
-        // cacheRead/cacheWriteも集計（converseBedrock返却値から直接取得）
-        paraCacheReadTokens += translationResp.cacheReadTokens || 0;
-        paraCacheWriteTokens += translationResp.cacheWriteTokens || 0;
-        const { stopReason_check } = translationResp;
-        if (stopReason_check === true) {
-          translationMessages.push({
-            role: 'assistant',
-            content: [
-              {
-                text: paraTranslation
-              }
-            ]
-          });
+        // トークン使用量を加算します。
+        translationTokens.inputTokens += translationResp.inputTokens || 0;
+        translationTokens.outputTokens += translationResp.outputTokens || 0;
+        translationTokens.cacheReadTokens += translationResp.cacheReadTokens || 0;
+        translationTokens.cacheWriteTokens += translationResp.cacheWriteTokens || 0;
+
+        // `max_tokens` で停止した場合は、現在の翻訳結果をコンテキストに追加してループを継続します。
+        if (translationResp.stopReason_check === true) {
+          translationMessages.push({ role: 'assistant', content: [{ text: paraTranslation }] });
         } else {
           continueFlag = false;
         }
       }
       translatedLines.push(paraTranslation);
-      translationTokens.input += paraInputTokens;
-      translationTokens.output += paraOutputTokens;
-      translationTokens.cacheRead += paraCacheReadTokens;
-      translationTokens.cacheWrite += paraCacheWriteTokens;
     }
+    console.log('end translate...');
 
-    // Bedrockレスポンスのusage, content抽出（必ずtextを抽出）
-    function extractText(resp) {
-      if (resp.content) return resp.content;
-      if (resp.output && resp.output.message && Array.isArray(resp.output.message.content)) {
-        const arr = resp.output.message.content;
-        // type: text優先、なければtextプロパティ
-        const textObj = arr.find(c => c.type === 'text' && typeof c.text === 'string');
-        if (textObj) return textObj.text;
-        const anyTextObj = arr.find(c => typeof c.text === 'string');
-        if (anyTextObj) return anyTextObj.text;
-      }
-      return '';
-    }
-
-    // 全体のトークン使用量を計算
-    const totalInputTokens = (summaryResp.inputTokens || 0) + (charactersResp.inputTokens || 0) + (paragraphResp.inputTokens || 0) + translationTokens.input;
-    const totalOutputTokens = (summaryResp.outputTokens || 0) + (charactersResp.outputTokens || 0) + (paragraphResp.outputTokens || 0) + translationTokens.output;
-    const totalCacheReadTokens = (summaryResp.cacheReadTokens || 0) + (charactersResp.cacheReadTokens || 0) + (paragraphResp.cacheReadTokens || 0) + translationTokens.cacheRead;
-    const totalCacheWriteTokens = (summaryResp.cacheWriteTokens || 0) + (charactersResp.cacheWriteTokens || 0) + (paragraphResp.cacheWriteTokens || 0) + translationTokens.cacheWrite;
-
-    // コスト計算
-    const cost = (totalInputTokens * COST_PER_INPUT_TOKEN)
-              + (totalOutputTokens * COST_PER_OUTPUT_TOKEN)
-              + (totalCacheReadTokens * COST_PER_CACHE_READ)
-              + (totalCacheWriteTokens * COST_PER_CACHE_WRITE);
-
-    // summary, charactersも同様に抽出
-    let summaryText    = extractText(summaryResp);
-    let charactersText = extractText(charactersResp);
-
-    // デバッグ用: レスポンス内容をstatus欄に一時表示
-    const debugInfo = {
-      summaryResp,
-      charactersResp,
-      paragraphResp,
-      translationDebugs
+    // 全体のトークン使用量を計算します。
+    const totalUsage = {
+      inputTokens: (summaryResp.inputTokens || 0) + (charactersResp.inputTokens || 0) + (paragraphResp.inputTokens || 0) + translationTokens.inputTokens,
+      outputTokens: (summaryResp.outputTokens || 0) + (charactersResp.outputTokens || 0) + (paragraphResp.outputTokens || 0) + translationTokens.outputTokens,
+      cacheReadInputTokens: (summaryResp.cacheReadTokens || 0) + (charactersResp.cacheReadTokens || 0) + (paragraphResp.cacheReadTokens || 0) + translationTokens.cacheReadTokens,
+      cacheWriteInputTokens: (summaryResp.cacheWriteTokens || 0) + (charactersResp.cacheWriteTokens || 0) + (paragraphResp.cacheWriteTokens || 0) + translationTokens.cacheWriteTokens,
     };
 
+    // 最終的なレスポンスをJSON形式で返します。
     res.json({
       success: true,
       usage: {
-        inputTokens: totalInputTokens,
-        outputTokens: totalOutputTokens,
-        cacheReadInputTokens: totalCacheReadTokens,
-        cacheWriteInputTokens: totalCacheWriteTokens,
-        cost: cost.toFixed(6)
+        ...totalUsage,
+        cost: calculateCost(totalUsage) // 合計コストを計算
       },
-      summary:    summaryText,
-      characters: charactersText,
+      summary: summaryResp.content || '',
+      characters: charactersResp.content || '',
       originalParagraphs,
       translatedLines,
       authorName,
       bookTitle,
-      debugInfo
     });
   } catch (error) {
+    // エラーが発生した場合は、エラーメッセージをコンソールに出力し、500エラーを返します。
     console.error(error.response?.data || error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-
+// サーバーをポート3000で起動します。
 const PORT = 3000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

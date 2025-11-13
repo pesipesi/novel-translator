@@ -7,48 +7,61 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <!-- メインコンテナ -->
   <div class="container">
+    <!-- ヘッダー部分 -->
     <header>
       <h1>小説翻訳アプリ</h1>
       <p class="subtitle">Amazon Bedrock 対応・小説要約＆翻訳ツール</p>
     </header>
+    <!-- 翻訳設定フォーム -->
     <form id="translateForm" class="modern-form">
+      <!-- モデルID入力 -->
       <div class="form-row">
         <label>使用モデルID(推論プロファイルID)</label>
         <input type="text" name="modelId" required placeholder="例: apac.anthropic.claude-sonnet-4-20250514-v1:0" />
       </div>
+      <!-- リージョン名入力 -->
       <div class="form-row">
         <label>リージョン名</label>
         <input type="text" name="region" required placeholder="例: us-east-1" />
       </div>
+      <!-- AWSアクセスキーID入力 -->
       <div class="form-row">
         <label>AWSアクセスキーID</label>
         <input type="text" name="accessKeyId" required />
       </div>
+      <!-- AWSシークレットアクセスキー入力 -->
       <div class="form-row">
         <label>AWSシークレットアクセスキー</label>
         <input type="password" name="secretAccessKey" required />
       </div>
+      <!-- 翻訳元言語入力 -->
       <div class="form-row">
         <label>翻訳元言語</label>
         <input type="text" name="sourceLang" required placeholder="例: 日本語" />
       </div>
+      <!-- 翻訳先言語入力 -->
       <div class="form-row">
         <label>翻訳先言語</label>
         <input type="text" name="targetLang" required placeholder="例: 英語" />
       </div>
+      <!-- 作者名入力（任意） -->
       <div class="form-row">
         <label>作者名</label>
         <input type="text" name="authorName" placeholder="任意" />
       </div>
+      <!-- タイトル入力（任意） -->
       <div class="form-row">
         <label>タイトル</label>
         <input type="text" name="bookTitle" placeholder="任意" />
       </div>
+      <!-- 本文ファイル選択 -->
       <div class="form-row">
         <label>本文ファイル(txt)</label>
         <input type="file" name="novelFile" accept=".txt" required />
       </div>
+      <!-- 高度な設定（高精度翻訳、温度） -->
       <div class="form-row">
         <label style="display:flex;align-items:center;gap:1em;">
           <span>
@@ -62,43 +75,55 @@
           </span>
         </label>
       </div>
+      <!-- フォーム送信ボタン -->
       <div class="form-row">
         <button type="submit" class="main-btn">翻訳開始</button>
       </div>
     </form>
 
+    <!-- 翻訳結果表示セクション -->
     <section id="results" style="display:none;" class="results-section">
       <h2>結果</h2>
+      <!-- 進捗バー -->
       <div style="margin-bottom:1em;">
         <progress id="progressBar" value="0" max="100" style="width: 100%; height: 20px;"></progress>
       </div>
+      <!-- ステータス表示 -->
       <div id="status"></div>
 
+      <!-- 要約結果 -->
       <div class="result-block">
         <h3>要約 <button id="copySummaryBtn" class="copy-btn" title="要約をコピー">📋</button></h3>
         <div id="summary" class="result-content"></div>
       </div>
 
+      <!-- 登場人物紹介結果 -->
       <div class="result-block">
         <h3>登場人物 <button id="copyCharactersBtn" class="copy-btn" title="登場人物紹介をコピー">📋</button></h3>
         <div id="characters" class="result-content"></div>
       </div>
 
+      <!-- 本文翻訳結果 -->
       <div class="result-block">
         <h3>本文翻訳</h3>
+        <!-- 小説メタ情報（タイトル、作者） -->
         <div id="novelMeta" style="margin-bottom:8px;"></div>
+        <!-- コピー用ボタン群 -->
         <div class="copy-group">
           <button id="copyTranslationAllBtn" class="copy-btn" title="翻訳後全文コピー">全文copy❒</button>
           <button id="copyTranslationParaBtn" class="copy-btn" title="翻訳後段落コピー">段落copy❒</button>
           <button id="copyOriginalAllBtn" class="copy-btn" title="原文全文コピー">原文全文❒</button>
           <button id="copyOriginalParaBtn" class="copy-btn" title="原文段落コピー">原文段落❒</button>
         </div>
+        <!-- 対訳表示切り替えボタン -->
         <button id="toggleParallel" class="main-btn sub">対訳表示</button>
+        <!-- 翻訳本文表示エリア -->
         <div id="translation"></div>
       </div>
     </section>
-  <script src="novelmeta.js"></script>
   </div>
+  <!-- 外部スクリプトの読み込み -->
+  <script src="novelmeta.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
